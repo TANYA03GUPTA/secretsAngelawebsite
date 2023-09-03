@@ -4,21 +4,32 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const ejs = require("ejs");
 const mongoose = require('mongoose');
-const md5 = require('md5');
-const bcrypt = require("bcrypt");
+const session = require('express-session');
+const passport = require('passport');
+const passportLocalMongoose = require('passport-local-mongoose');
 
 
 const app = express();
 const port = 3005;
-const saltrounds= 2;
 
 
 app.use(express.static("public"));
 app.set('view engine','ejs');
 app.use(bodyParser.urlencoded({extended: true}));
 
+app.use(session({
+    secret: "Our big cruncyr alpha male secret",
+    resave : false,
+    saveUniitialized: false
+}));
+//initiliasing passport
+app.use(passport.initialize());
+app.use(passport.session());
+
 //mongodbconnect
 mongoose.connect("mongodb+srv://gupta14aynat:QlBOCCTW6x0IN9DY@cluster0.qiivb9y.mongodb.net/userDB", { useNewUrlParser: true })
+
+
 const db = mongoose.connection;
 db.on('error', console.error.bind(console, ' MongoDb connection error: '));
 //schema create for userSelect: 
@@ -28,9 +39,16 @@ const UserSchema = new mongoose.Schema({
 })
 
 
+
+//passport plugin--does heavy lifting
+UserSchema.plugin(passportLocalMongoose);
+
 //model create
 const User = new mongoose.model("User",UserSchema)
 
+passport.use(User.createStrategy());
+passport.serializeUser(User.serializeUser());
+passport.deserializeUser(User.deserializeUser());
 
 app.get("/",(req,res)=>{
     res.render("home");
@@ -44,58 +62,59 @@ app.get("/register",(req,res)=>{
     res.render("register");
     console.log("/register pr hai")
 })
+app.get("/secrets",(req,res)=>{
+    //if not logined redirect to register
+    if(req.isAuthenticated()){
+        res.render("secrets");
+    }else{
+        res.redirect("/login");
+    }
+})
 app.post("/register",(req,res)=>{
-    bcrypt.hash(req.body.password, saltrounds, function(err,hash){
-        const newUser = new User({
-            email: req.body.username,
-            password: md5(req.body.password)
+  
+    User.register({ username: req.body.username},
+        req.body.password ,
+        function(err,user){
+            if(err){
+                console.log(err);
+                res.redirect("/register");
+            }else{
+                passport.authenticate("local")(req,res,function(){
+                    //if cookie
+                    res.redirect("/secrets");
+                })
+            }
         })
-    
-        newUser
-        .save()
-        .then(()=>{
-            res.render("secrets");
-        })
-        .catch((err)=>{
-            console.log(err);
-        });
-        
-    });
     
 });
 
 app.post("/login",async(req,res)=>{
-    const username = req.body.username;
-    const password = md5(req.body.password);
+   
+    const user = new User({
+        username: req.body.username,
+        password: req.body.password
+    })
 
-    try{
-       const foundName = await User.findOne({email: username})
-       if(foundName){
-        bcrypt.compare(password, foundName.password, function(err,result){
-            if(result === true)
-              res.render("secrets");
-            else{
-                console.log("password does not match.Try Again!")  
-               
-            }
-        })
-        //if(foundName.password === password)
-        //     res.render("secrets");
-       /* else{
-            console.log("password does not match.Try Again!")  
-           
-        }*/
-             
-       }else{
-        console.log("user not found");
-        
-       }
-          
-    }catch(err){
+    req.logIn(user, function(err){
+       if(err)
         console.log(err);
-    }
+       else{
+        passport.authenticate("local")(req,res ,function(){
+          res.redirect("/secrets");
+        })
+       }
+    })
 })
 
+app.get("/logout",(req,res)=>{
+    req.logOut((err)=>{
+        if(err)
+            console.log(err);
+        else
+           res.redirect("/");
+    });
+
+})
 app.listen(port, function(){
     console.log(`server listening on ${port} Port`);
 })
